@@ -6,9 +6,9 @@ IMPORT SYSTEM, Linux0, Kernel, Sockets, TLS13Live, cobweb, out;
 
 VAR s: POINTER TO TLS13Live.State;
 
-PROCEDURE Sleep(ms: LONGINT);
-VAR t: Kernel.MilliTimer;
-BEGIN Kernel.SetTimer(t, ms); WHILE ~Kernel.Expired(t) DO END
+PROCEDURE Sleep(ms: LONGINT);  (* GetTimer counts milliseconds on every port (TimeUnit) *)
+VAR t: LONGINT;
+BEGIN t := Kernel.GetTimer(); WHILE Kernel.GetTimer() - t < ms DO END
 END Sleep;
 
 (* waits until port takes connections (the probe is one connection of the server) *)
