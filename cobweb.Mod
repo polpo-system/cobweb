@@ -12,7 +12,7 @@ MODULE cobweb;  (** an HTTP/1.1 server for the files of a directory, plain or ov
    one Serve. Ctrl+C stops the server and closes its socket.
    The certificate of /tls must have an ECDSA P-256 key (TLS13Server). *)
 
-IMPORT SYSTEM, Linux0, Kernel, Sockets, TLSBytes, TLS13Live, TLS13Server, Texts := texts, out, Oberon := Oberon0;
+IMPORT Kernel, Files, FATFiles, Sockets, TLSBytes, TLS13Live, TLS13Server, Texts := texts, out, Oberon := Oberon0;
 
 CONST
   DefaultPort = 8080; DefaultTLSPort = 8443;
@@ -40,6 +40,7 @@ VAR
   conn: Sockets.Socket;     (* the connection being served (plain) *)
   s: State;                 (* the connection being served (TLS) *)
   tls: BOOLEAN;
+  entries: Entry;           (* the entries of a directory Collect gathers *)
   root: ARRAY PathLen OF CHAR;
   host: ARRAY 256 OF CHAR;  (* the host to serve, "" for any *)
   queueLen, timeout: LONGINT;
@@ -260,43 +261,39 @@ BEGIN
   END
 END MimeType;
 
-(* the file open as fd *)
-PROCEDURE SendFile(VAR req: Request; fd: LONGINT; VAR name: ARRAY OF CHAR);
-VAR b: TLSBytes.Buffer; n, left: LONGINT; mime: ARRAY 64 OF CHAR; st: Linux0.Status;
+(* the file f; its descriptor is closed after *)
+PROCEDURE SendFile(VAR req: Request; f: Files.File; VAR name: ARRAY OF CHAR);
+VAR b: TLSBytes.Buffer; r: Files.Rider; n, left, t, d: LONGINT; mime: ARRAY 64 OF CHAR;
 BEGIN
-  IF Linux0.FStat0(fd, SYSTEM.ADR(st)) # 0 THEN Error(req, 500, ""); RETURN END;
-  MimeType(name, mime); Head(200, mime, st.size, st.mtime, "");
-  IF req.head THEN RETURN END;
-  left := st.size;  (* no more than announced, if the file grows meanwhile *)
-  WHILE ok & (left > 0) DO
-    n := left; IF n > Chunk THEN n := Chunk END;
-    n := Linux0.Read0(fd, SYSTEM.ADR(b.data[0]), n);
-    IF n <= 0 THEN ok := FALSE ELSE b.len := n; SendBuffer(b); DEC(left, n) END
-  END
+  Files.GetDate(f, t, d);
+  MimeType(name, mime); Head(200, mime, Files.Length(f), Kernel.O2UTime(d, t), "");
+  IF ~req.head THEN
+    left := Files.Length(f); Files.Set(r, f, 0);
+    WHILE ok & (left > 0) DO
+      n := left; IF n > Chunk THEN n := Chunk END;
+      Files.ReadBytes(r, b.data, n); b.len := n; SendBuffer(b); DEC(left, n)
+    END
+  END;
+  Files.ReleaseRead(f)
 END SendFile;
 
-PROCEDURE ReadDir(fd: LONGINT; VAR list: Entry): BOOLEAN;
-VAR n, i, k, rec: LONGINT; buf: ARRAY 4096 OF CHAR; e, p, q: Entry;
+PROCEDURE Collect(name: ARRAY OF CHAR; time, date, size: LONGINT; attr: SET; VAR continue: BOOLEAN);
+VAR e, p, q: Entry;
 BEGIN
-  list := NIL;
-  n := Linux0.GetDents0(fd, SYSTEM.ADR(buf[0]), LEN(buf));  (* getdents64: length at 16, type at 18, name at 19 *)
-  IF n < 0 THEN RETURN FALSE END;
-  WHILE n > 0 DO
-    i := 0;
-    WHILE i < n DO
-      rec := ORD(buf[i + 16]) + 256 * LONG(ORD(buf[i + 17]));
-      IF buf[i + 19] # "." THEN
-        NEW(e); k := 0; WHILE (buf[i + 19 + k] # 0X) & (k < NameLen - 1) DO e.name[k] := buf[i + 19 + k]; INC(k) END;
-        e.name[k] := 0X; e.dir := buf[i + 18] = 4X;  (* DT_DIR *)
-        IF (list = NIL) OR (e.name < list.name) THEN e.next := list; list := e
-        ELSE p := list; q := list.next; WHILE (q # NIL) & (q.name < e.name) DO p := q; q := q.next END; e.next := q; p.next := e
-        END
-      END;
-      INC(i, rec)
-    END;
-    n := Linux0.GetDents0(fd, SYSTEM.ADR(buf[0]), LEN(buf))
-  END;
-  RETURN TRUE
+  IF name[0] # "." THEN
+    NEW(e); COPY(name, e.name); e.dir := FATFiles.SubDir IN attr;
+    IF (entries = NIL) OR (e.name < entries.name) THEN e.next := entries; entries := e
+    ELSE p := entries; q := entries.next; WHILE (q # NIL) & (q.name < e.name) DO p := q; q := q.next END; e.next := q; p.next := e
+    END
+  END
+END Collect;
+
+(* the entries of the directory dir, sorted, without names starting with a dot *)
+PROCEDURE ReadDir(VAR dir: ARRAY OF CHAR; VAR list: Entry);
+VAR pat: ARRAY PathLen + 32 OF CHAR; res: LONGINT;
+BEGIN
+  COPY(dir, pat); IF pat[Len(pat) - 1] # "/" THEN Append(pat, "/") END;
+  entries := NIL; FATFiles.Enumerate(pat, Collect, res); list := entries; entries := NIL
 END ReadDir;
 
 (* an HTML list of the files in the directory path (ending with /) *)
@@ -418,29 +415,29 @@ END Parse;
 
 (* answers the request; status: the status sent *)
 PROCEDURE Answer(VAR req: Request; VAR status: LONGINT);
-VAR file, index, location: ARRAY PathLen + 32 OF CHAR; fd, fd2, r, i: LONGINT; list: Entry;
+VAR file, index, location: ARRAY PathLen + 32 OF CHAR; i: LONGINT; list: Entry; f: Files.File; full: Files.FileName; flags: SET;
 BEGIN
   IF (host[0] # 0X) & ~SameName(req.host, host) THEN status := 421; Error(req, 421, ""); RETURN END;
   COPY(root, file); Append(file, req.path);
-  fd := Linux0.Openat0(Linux0.ATFDCWD, SYSTEM.ADR(file[0]), Linux0.ORDonly, 0);
-  IF fd < 0 THEN
-    IF fd = -13 THEN status := 403 ELSE status := 404 END;  (* EACCES *)
-    Error(req, status, "")
-  ELSIF ReadDir(fd, list) THEN
+  IF ~Files.Exists(file, full, flags) THEN status := 404; Error(req, status, "")
+  ELSIF Files.Directory IN flags THEN
     IF req.path[Len(req.path) - 1] # "/" THEN
       status := 301; COPY(req.target, location);
       i := 0; WHILE (location[i] # 0X) & (location[i] # "?") DO INC(i) END;
       location[i] := 0X; Append(location, "/"); Error(req, 301, location)
     ELSE
       COPY(file, index); Append(index, "index.html");
-      fd2 := Linux0.Openat0(Linux0.ATFDCWD, SYSTEM.ADR(index[0]), Linux0.ORDonly, 0);
+      IF Files.Exists(index, full, flags) & ~(Files.Directory IN flags) THEN f := Files.Old(index) ELSE f := NIL END;
       status := 200;
-      IF fd2 >= 0 THEN SendFile(req, fd2, index); r := Linux0.Close0(fd2)
-      ELSE SendList(req, list)
+      IF f # NIL THEN SendFile(req, f, index)
+      ELSE ReadDir(file, list); SendList(req, list)
       END
-    END;
-    r := Linux0.Close0(fd)
-  ELSE status := 200; SendFile(req, fd, file); r := Linux0.Close0(fd)
+    END
+  ELSE
+    f := Files.Old(file);
+    IF f = NIL THEN status := 403; Error(req, status, "")  (* there, but it cannot be read *)
+    ELSE status := 200; SendFile(req, f, file)
+    END
   END
 END Answer;
 
