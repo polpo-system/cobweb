@@ -2,7 +2,7 @@ MODULE CobwebTest;  (* CobwebTest.Run: cobweb serves this directory in two child
   over HTTPS (cert.pem and key.pem for localhost); this process asks for pages and prints the
   status lines and whether the bodies are right *)
 
-IMPORT SYSTEM, Linux0, Kernel, Sockets, TLS13Live, cobweb, out;
+IMPORT SYSTEM, Linux0, Kernel, Sockets, TLS13Live, cobweb, Out;
 
 VAR s: POINTER TO TLS13Live.State;
 
@@ -42,15 +42,15 @@ PROCEDURE Show(VAR buf: ARRAY OF CHAR; text: ARRAY OF CHAR);
 VAR i, j: LONGINT; found: BOOLEAN;
 BEGIN
   i := 0; WHILE (buf[i] # 0X) & (buf[i] # 0DX) DO INC(i) END;
-  out.String("status: "); j := 0; WHILE j < i DO out.Char(buf[j]); INC(j) END; out.Ln;
+  Out.String("status: "); j := 0; WHILE j < i DO Out.Char(buf[j]); INC(j) END; Out.Ln;
   IF text[0] # 0X THEN
     found := FALSE; i := 0;
     WHILE ~found & (buf[i] # 0X) DO
       j := 0; WHILE (text[j] # 0X) & (buf[i + j] = text[j]) DO INC(j) END;
       found := text[j] = 0X; INC(i)
     END;
-    IF found THEN out.String("has: ") ELSE out.String("missing: ") END;
-    out.String(text); out.Ln
+    IF found THEN Out.String("has: ") ELSE Out.String("missing: ") END;
+    Out.String(text); Out.Ln
   END
 END Show;
 
@@ -69,9 +69,9 @@ VAR a: Sockets.Address; c: Sockets.Socket; req: ARRAY 256 OF CHAR; buf: ARRAY 81
 BEGIN
   IF ~Sockets.ParseAddress("127.0.0.1", a) THEN RETURN END;
   c := Sockets.Connect(a, port);
-  IF c = NIL THEN out.String("no connection"); out.Ln; RETURN END;
+  IF c = NIL THEN Out.String("no connection"); Out.Ln; RETURN END;
   Request(method, path, req); n := 0; WHILE req[n] # 0X DO INC(n) END;
-  IF Sockets.Send(c, req, n) # n THEN out.String("not sent"); out.Ln END;
+  IF Sockets.Send(c, req, n) # n THEN Out.String("not sent"); Out.Ln END;
   n := 0; got := 1;
   WHILE (got > 0) & (n < LEN(buf) - 1) DO got := Sockets.Receive(c, buf[n], LEN(buf) - 1 - n); IF got > 0 THEN INC(n, got) END END;
   buf[n] := 0X; Sockets.Close(c);
@@ -82,9 +82,9 @@ END Get;
 PROCEDURE GetTLS(port: ARRAY OF CHAR; path, text: ARRAY OF CHAR);
 VAR req: ARRAY 256 OF CHAR; buf: ARRAY 8192 OF CHAR; n, got, i: LONGINT;
 BEGIN
-  IF ~TLS13Live.ConnectPinned("localhost", port, s^, "") THEN out.String("no connection: "); out.String(TLS13Live.lastError); out.Ln; RETURN END;
+  IF ~TLS13Live.ConnectPinned("localhost", port, s^, "") THEN Out.String("no connection: "); Out.String(TLS13Live.lastError); Out.Ln; RETURN END;
   Request("GET", path, req);
-  IF ~TLS13Live.WriteAppString(s^, req) THEN out.String("not sent"); out.Ln END;
+  IF ~TLS13Live.WriteAppString(s^, req) THEN Out.String("not sent"); Out.Ln END;
   n := 0;
   WHILE (n < LEN(buf) - 1) & TLS13Live.ReadAppMax(s^, req, 255, got) DO
     i := 0; WHILE (i < got) & (n < LEN(buf) - 1) DO buf[n] := req[i]; INC(n); INC(i) END
@@ -97,9 +97,9 @@ PROCEDURE Wait(pid: LONGINT; what: ARRAY OF CHAR);
 VAR r, st: LONGINT;
 BEGIN
   st := 0; r := Linux0.Waitpid0(pid, SYSTEM.ADR(st), 0);
-  out.String(what);
-  IF (r = pid) & (st = 0) THEN out.String(" server ended") ELSE out.String(" server failed") END;
-  out.Ln
+  Out.String(what);
+  IF (r = pid) & (st = 0) THEN Out.String(" server ended") ELSE Out.String(" server failed") END;
+  Out.Ln
 END Wait;
 
 PROCEDURE Run*;
@@ -109,7 +109,7 @@ BEGIN
   port := 20000 + Kernel.GetTimer() MOD 20000;
   plain := Linux0.Fork0();
   IF plain = 0 THEN cobweb.Start(".", "", "", "", port, 6, 4, 5); Linux0.Exit0(0) END;
-  IF ~Ready(port) THEN out.String("the HTTP server did not start"); out.Ln
+  IF ~Ready(port) THEN Out.String("the HTTP server did not start"); Out.Ln
   ELSE
     Get(port, "GET", "/", "zq test site");
     Get(port, "HEAD", "/index.html", "Content-Length: 30");
@@ -121,7 +121,7 @@ BEGIN
   INC(port); IntToStr(port, p);
   secure := Linux0.Fork0();
   IF secure = 0 THEN cobweb.Start(".", "cert.pem", "key.pem", "localhost", port, 2, 4, 5); Linux0.Exit0(0) END;
-  IF ~Ready(port) THEN out.String("the HTTPS server did not start"); out.Ln
+  IF ~Ready(port) THEN Out.String("the HTTPS server did not start"); Out.Ln
   ELSE GetTLS(p, "/", "zq test site")
   END;
   Wait(secure, "the HTTPS")

@@ -12,7 +12,7 @@ MODULE cobweb;  (** an HTTP/1.1 server for the files of a directory, plain or ov
    one Serve. Ctrl+C stops the server and closes its socket.
    The certificate of /tls must have an ECDSA P-256 key (TLS13Server). *)
 
-IMPORT Kernel, Files, FATFiles, Sockets, TLSBytes, TLS13Live, TLS13Server, Texts := texts, out, Oberon := Oberon0;
+IMPORT Kernel, Files, FATFiles, Sockets, TLSBytes, TLS13Live, TLS13Server, Texts, Out, Oberon := Oberon0;
 
 CONST
   DefaultPort = 8080; DefaultTLSPort = 8443;
@@ -460,9 +460,9 @@ END Int;
 
 PROCEDURE Usage;
 BEGIN
-  out.String("usage: cobweb.Serve dir [port] [/tls cert.pem key.pem] [/host name] [/n count] [/queue n] [/timeout s]"); out.Ln;
-  out.String("  serves the files below dir over HTTP (port 8080) or HTTPS (/tls, port 8443);"); out.Ln;
-  out.String("  cobweb.Help tells more"); out.Ln
+  Out.String("usage: cobweb.Serve dir [port] [/tls cert.pem key.pem] [/host name] [/n count] [/queue n] [/timeout s]"); Out.Ln;
+  Out.String("  serves the files below dir over HTTP (port 8080) or HTTPS (/tls, port 8443);"); Out.Ln;
+  Out.String("  cobweb.Help tells more"); Out.Ln
 END Usage;
 
 (* one connection: c accepted, served, closed *)
@@ -472,7 +472,7 @@ BEGIN
   ok := TRUE; req.target := ""; req.method := ""; req.head := FALSE;
   IF tls THEN
     IF ~TLS13Server.Accept(c.fd, id, s^) THEN
-      out.String(addr); out.String(" handshake failed: "); out.String(TLS13Server.lastError); out.Ln; RETURN
+      Out.String(addr); Out.String(" handshake failed: "); Out.String(TLS13Server.lastError); Out.Ln; RETURN
     END
   ELSE conn := c
   END;
@@ -482,9 +482,9 @@ BEGIN
   ELSIF head[0] # 0X THEN Error(req, status, "")  (* nothing for a client that sent nothing *)
   END;
   IF tls THEN TLS13Live.Disconnect(s^) ELSE Sockets.Close(conn); conn := NIL END;
-  out.String(addr); out.Char(" "); out.Int(status, 0); out.Char(" ");
-  IF req.method[0] = 0X THEN out.Char("-") ELSE out.String(req.method); out.Char(" "); out.String(req.target) END;
-  out.Ln
+  Out.String(addr); Out.Char(" "); Out.Int(status, 0); Out.Char(" ");
+  IF req.method[0] = 0X THEN Out.Char("-") ELSE Out.String(req.method); Out.Char(" "); Out.String(req.target) END;
+  Out.Ln
 END Connection;
 
 (** serves the files below dir on port, over HTTPS with the certificate in cert and its key in
@@ -498,14 +498,14 @@ BEGIN
   COPY(dir, root); COPY(hostName, host); tls := cert[0] # 0X;
   WHILE (Len(root) > 1) & (root[Len(root) - 1] = "/") DO root[Len(root) - 1] := 0X END;
   id := NIL;
-  IF tls & ~TLS13Server.Load(cert, key, id) THEN out.String("cobweb: "); out.String(TLS13Server.lastError); out.Ln; RETURN END;
+  IF tls & ~TLS13Server.Load(cert, key, id) THEN Out.String("cobweb: "); Out.String(TLS13Server.lastError); Out.Ln; RETURN END;
   Close; Oberon.OnStop(Close);
   IF tls & (s = NIL) THEN NEW(s); TLS13Live.Init(s^) END;
   listener := Sockets.Listen(Sockets.Inet6, port, queue);
-  IF listener = NIL THEN out.String("cobweb: cannot listen on port "); out.Int(port, 0); out.Ln; RETURN END;
-  out.String("cobweb: serving "); out.String(root); out.String(" on port "); out.Int(port, 0);
-  IF tls THEN out.String(" (https)") ELSE out.String(" (http)") END;
-  out.Ln;
+  IF listener = NIL THEN Out.String("cobweb: cannot listen on port "); Out.Int(port, 0); Out.Ln; RETURN END;
+  Out.String("cobweb: serving "); Out.String(root); Out.String(" on port "); Out.Int(port, 0);
+  IF tls THEN Out.String(" (https)") ELSE Out.String(" (http)") END;
+  Out.Ln;
   served := 0;
   WHILE served # count DO
     c := Sockets.Accept(listener, peer, peerPort);
@@ -545,7 +545,7 @@ VAR A: Texts.Reader; arg: ARRAY 32 OF CHAR;
 BEGIN
   Texts.OpenArgs(A);
   IF Texts.Arg(A, arg) & Int(arg, n) THEN RETURN TRUE END;
-  out.String("usage: cobweb."); out.String(usage); out.Ln;
+  Out.String("usage: cobweb."); Out.String(usage); Out.Ln;
   RETURN FALSE
 END NumArg;
 
@@ -554,7 +554,7 @@ PROCEDURE SetQueueLen*;
 VAR n: LONGINT;
 BEGIN
   IF NumArg("SetQueueLen n   (connections waiting while one is served)", n) & (n > 0) THEN queueLen := n END;
-  out.String("cobweb: queue "); out.Int(queueLen, 0); out.Ln
+  Out.String("cobweb: queue "); Out.Int(queueLen, 0); Out.Ln
 END SetQueueLen;
 
 (** cobweb.SetTimeout s: the seconds a client may take, for the next Serve (0: no limit) *)
@@ -562,31 +562,31 @@ PROCEDURE SetTimeout*;
 VAR n: LONGINT;
 BEGIN
   IF NumArg("SetTimeout s   (seconds a client may take, 0: no limit)", n) THEN timeout := n END;
-  out.String("cobweb: timeout "); out.Int(timeout, 0); out.String(" s"); out.Ln
+  Out.String("cobweb: timeout "); Out.Int(timeout, 0); Out.String(" s"); Out.Ln
 END SetTimeout;
 
 PROCEDURE Help*;
 BEGIN
-  out.String("cobweb, an HTTP server"); out.Ln; out.Ln;
-  out.String("  cobweb.Serve dir [port] [/tls cert.pem key.pem] [/host name] [/n count]"); out.Ln;
-  out.String("               [/queue n] [/timeout s]"); out.Ln;
-  out.String("    serves the files below dir: over HTTP on port 8080, or with /tls over HTTPS"); out.Ln;
-  out.String("    on port 8443. GET and HEAD, one request per connection. A directory gives"); out.Ln;
-  out.String("    its index.html, or a list of its files; names starting with a dot are not"); out.Ln;
-  out.String("    served. /host name answers only requests for that host; /n count ends after"); out.Ln;
-  out.String("    count connections. Each request is logged: the client, the status, the request."); out.Ln;
-  out.String("    One client is served at a time; the others wait in a queue (16), each client"); out.Ln;
-  out.String("    has 10 seconds. /queue n and /timeout s change them for one Serve;"); out.Ln;
-  out.String("    cobweb.SetQueueLen n and cobweb.SetTimeout s for the next Serve in this loksh."); out.Ln;
-  out.String("    Ctrl+C stops the server."); out.Ln; out.Ln;
-  out.String("  The certificate of /tls needs an ECDSA P-256 key, from a CA (Let's Encrypt:"); out.Ln;
-  out.String("  certbot --key-type ecdsa) or self-signed, made with openssl:"); out.Ln; out.Ln;
-  out.String("    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes"); out.Ln;
-  out.String("      -keyout key.pem -out cert.pem -days 3650 -subj /CN=example.org"); out.Ln; out.Ln;
-  out.String("  Examples:"); out.Ln;
-  out.String("    loksh cobweb.Serve /home/me/site"); out.Ln;
-  out.String("    loksh cobweb.Serve /home/me/site 443 /tls fullchain.pem privkey.pem"); out.Ln;
-  out.String("    loksh fetch.Show http://localhost:8080/"); out.Ln
+  Out.String("cobweb, an HTTP server"); Out.Ln; Out.Ln;
+  Out.String("  cobweb.Serve dir [port] [/tls cert.pem key.pem] [/host name] [/n count]"); Out.Ln;
+  Out.String("               [/queue n] [/timeout s]"); Out.Ln;
+  Out.String("    serves the files below dir: over HTTP on port 8080, or with /tls over HTTPS"); Out.Ln;
+  Out.String("    on port 8443. GET and HEAD, one request per connection. A directory gives"); Out.Ln;
+  Out.String("    its index.html, or a list of its files; names starting with a dot are not"); Out.Ln;
+  Out.String("    served. /host name answers only requests for that host; /n count ends after"); Out.Ln;
+  Out.String("    count connections. Each request is logged: the client, the status, the request."); Out.Ln;
+  Out.String("    One client is served at a time; the others wait in a queue (16), each client"); Out.Ln;
+  Out.String("    has 10 seconds. /queue n and /timeout s change them for one Serve;"); Out.Ln;
+  Out.String("    cobweb.SetQueueLen n and cobweb.SetTimeout s for the next Serve in this loksh."); Out.Ln;
+  Out.String("    Ctrl+C stops the server."); Out.Ln; Out.Ln;
+  Out.String("  The certificate of /tls needs an ECDSA P-256 key, from a CA (Let's Encrypt:"); Out.Ln;
+  Out.String("  certbot --key-type ecdsa) or self-signed, made with openssl:"); Out.Ln; Out.Ln;
+  Out.String("    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes"); Out.Ln;
+  Out.String("      -keyout key.pem -out cert.pem -days 3650 -subj /CN=example.org"); Out.Ln; Out.Ln;
+  Out.String("  Examples:"); Out.Ln;
+  Out.String("    loksh cobweb.Serve /home/me/site"); Out.Ln;
+  Out.String("    loksh cobweb.Serve /home/me/site 443 /tls fullchain.pem privkey.pem"); Out.Ln;
+  Out.String("    loksh fetch.Show http://localhost:8080/"); Out.Ln
 END Help;
 
 BEGIN
