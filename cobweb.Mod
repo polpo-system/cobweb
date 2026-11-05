@@ -481,10 +481,11 @@ BEGIN
   IF status = 0 THEN Answer(req, status)
   ELSIF head[0] # 0X THEN Error(req, status, "")  (* nothing for a client that sent nothing *)
   END;
-  IF tls THEN TLS13Live.Disconnect(s^) ELSE Sockets.Close(conn); conn := NIL END;
+  (* the log line before the connection ends: a client that reads until then writes after it *)
   Out.String(addr); Out.Char(" "); Out.Int(status, 0); Out.Char(" ");
   IF req.method[0] = 0X THEN Out.Char("-") ELSE Out.String(req.method); Out.Char(" "); Out.String(req.target) END;
-  Out.Ln
+  Out.Ln;
+  IF tls THEN TLS13Live.Disconnect(s^) ELSE Sockets.Close(conn); conn := NIL END
 END Connection;
 
 (** serves the files below dir on port, over HTTPS with the certificate in cert and its key in
